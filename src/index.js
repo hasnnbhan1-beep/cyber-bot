@@ -83,7 +83,7 @@ async function startBot() {
             || '';
         if (!text) return;
 
-        if (text.startsWith('زين ') || text.startsWith('يا زين ') || text.startsWith('مرحبا زين ')) {
+        if (text.length > 0 && !text.startsWith('زين افحص') && !text.startsWith('زين اشرح') && text !== 'زين نصيحة') {
             const prompt = text.replace(/^(يا زين|مرحبا زين|زين)\s+/, '');
             try {
                 await sock.sendPresenceUpdate('composing', from);
