@@ -75,7 +75,7 @@ async function startBot() {
                     },
                     { role: 'user', content: text }
                 ],
-                model: 'openai/gpt-oss-20b'
+                model: 'llama-3.1-8b-instant'
             });
 
             const reply = completion.choices[0]?.message?.content;
