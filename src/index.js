@@ -12,6 +12,7 @@ if (!GEMINI_API_KEY) {
     console.error("❌ خطأ حرج: GEMINI_API_KEY غير معرف في إعدادات Render!");
 }
 
+// 🚨 تصحيح طريقة الاستدعاء لعام 2026 لمنع الانهيار
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const PORT = process.env.PORT || 10000;
 let currentQR = null;
@@ -168,7 +169,9 @@ async function startBot() {
                 4. تحدث بنبرة قائد ومستشار استخباراتي سيبراني جبار، حاسم، دقيق، منظم بجداول ونقاط، باللغة العربية الفصحى الفخمة مع المصطلحات التقنية الإنجليزية واستخدام كثيف ومحترف للرموز الأمنية (🛡️, 🔒, 🚨, 💻, 🔍).`;
 
                 await sock.sendPresenceUpdate('composing', from);
-                const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+                
+                // 🚨 تعديل وتأمين استدعاء الموديل من الكود الجديد لجوجل
+                const model = ai.ai.getGenerativeModel({ model: "gemini-1.5-flash" });
                 
                 const response = await model.generateContent({
                     contents: [
