@@ -91,16 +91,18 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // 🚨 معالجة المكالمات الواردة بشكل معزول تماماً ومحمي لمنع تعليق السيرفر
+        // 🚨 تصحيح وتأمين رفض المكالمات الواردة بشكل مضمون يمنع انهيار السيرفر كلياً
         sock.ev.on('call', async (callUpdate) => {
             try {
                 if (!callUpdate || !callUpdate[0]) return;
                 const call = callUpdate[0];
                 if (call.status === 'offer') {
-                    console.log(`🚨 مكالمة واردة من: ${call.from} - جاري الرفض التلقائي الآمن...`);
+                    console.log(`🚨 مكالمة واردة من: ${call.from} - جاري الرفض التلقائي المضمون...`);
+                    
+                    // الرفض الفوري المتوافق مع الإصدارات الحديثة
                     await sock.rejectCall(call.id, call.from);
                     
-                    const notificationText = "🚨 بروتوكول الأمان التلقائي: منصة زين السيبرانية الجبارة لا تستقبل المكالمات المباشرة لحماية خوادم المعالجة. يرجى إرسال استفسارك الفني أو الكود الخاص بك بنص أو رسالة صوتية ليتم فحصها ومعالجتها أوتوماتيكياً فوراً.";
+                    const notificationText = "🚨 بروتوكول الأمان التلقائي: نظام زين السيبراني الجبار لا يستقبل المكالمات المباشرة. يرجى إرسال استفسارك الفني أو الكود الخاص بك بنص أو رسالة صوتية ليتم فحصها ومعالجتها أوتوماتيكياً فوراً.";
                     
                     await sock.sendMessage(call.from, { text: notificationText });
                     await sendVoiceReply(notificationText, call.from, null);
