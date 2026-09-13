@@ -12,7 +12,7 @@ if (!GEMINI_API_KEY) {
     console.error("❌ خطأ حرج: GEMINI_API_KEY غير معرف في إعدادات Render!");
 }
 
-// 🚨 تصحيح طريقة الاستدعاء لعام 2026 لمنع الانهيار
+// تصحيح الاستدعاء المباشر والمستقر لعام 2026 لمنع الانهيار
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const PORT = process.env.PORT || 10000;
 let currentQR = null;
@@ -96,7 +96,7 @@ async function startBot() {
                 const call = callUpdate;
                 if (call.status === 'offer') {
                     await sock.rejectCall(call.id, call.from);
-                    const notificationText = "🚨 بروتوكول الأمن الاستخباراتي: نظام زين السيبراني الأعلى قيد العمل التنفيذي المحمي ولا يستقبل المكالمات المباشرة. يرجى إرسال استفسارك الفني بنص أو رسالة صوتية.";
+                    const notificationText = "🚨 بروتوكول الأمن الاستخباراتي: نظام زين السيبراني الأعلى قيد العمل التنفيذي المحمي ولا يستقبل المكالمات المباشرة.";
                     await sock.sendMessage(call.from, { text: notificationText });
                     await sendVoiceReply(notificationText, call.from, null);
                 }
@@ -170,8 +170,8 @@ async function startBot() {
 
                 await sock.sendPresenceUpdate('composing', from);
                 
-                // 🚨 تعديل وتأمين استدعاء الموديل من الكود الجديد لجوجل
-                const model = ai.ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+                // تعديل الاستدعاء البرمجي لتحديد الموديل بشكل صحيح من كائن الـ ai
+                const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
                 
                 const response = await model.generateContent({
                     contents: [
