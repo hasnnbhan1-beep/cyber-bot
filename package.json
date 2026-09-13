@@ -1,0 +1,18 @@
+{
+  "name": "cyber-bot",
+  "version": "1.0.0",
+  "description": "Zain Cyber WhatsApp Bot",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "groq-sdk": "^0.9.0",
+    "qrcode": "^1.5.4",
+    "pino": "^9.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
