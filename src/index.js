@@ -12,7 +12,6 @@ if (!GEMINI_API_KEY) {
     console.error("❌ خطأ حرج: GEMINI_API_KEY غير معرف في إعدادات Render!");
 }
 
-// تصحيح الاستدعاء المباشر والمستقر لعام 2026 لمنع الانهيار
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const PORT = process.env.PORT || 10000;
 let currentQR = null;
@@ -170,7 +169,6 @@ async function startBot() {
 
                 await sock.sendPresenceUpdate('composing', from);
                 
-                // تعديل الاستدعاء البرمجي لتحديد الموديل بشكل صحيح من كائن الـ ai
                 const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
                 
                 const response = await model.generateContent({
