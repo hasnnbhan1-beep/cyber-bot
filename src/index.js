@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 10000;
 let currentQR = null;
 let sock = null;
 
-// 🎙️ ميزة الصوت MP3 فائقة النقاء والمدعومة 100% في الواتساب والهواتف
+// 🎙️ ميزة الصوت MP3 فائقة النقاء لإنهاء خطأ التلف تماماً على الهواتف
 async function sendVoiceReply(text, jid, quotedMsg) {
     let audioFilePath = null;
     try {
@@ -41,7 +41,7 @@ async function sendVoiceReply(text, jid, quotedMsg) {
             }, { quoted: quotedMsg });
         }
     } catch (err) {
-        console.log('⚠️ خطأ في معالجة الصوت:', err.message);
+        console.log('⚠️ خطأ TTS:', err.message);
     } finally {
         if (audioFilePath && fs.existsSync(audioFilePath)) {
             try { fs.unlinkSync(audioFilePath); } catch (e) {}
@@ -94,15 +94,13 @@ async function startBot() {
         // 🚨 تصحيح وتأمين رفض المكالمات الواردة بشكل مضمون يمنع انهيار السيرفر كلياً
         sock.ev.on('call', async (callUpdate) => {
             try {
-                if (!callUpdate || !callUpdate[0]) return;
-                const call = callUpdate[0];
-                if (call.status === 'offer') {
+                if (!callUpdate) return;
+                const call = callUpdate[0] || callUpdate;
+                if (call && call.status === 'offer') {
                     console.log(`🚨 مكالمة واردة من: ${call.from} - جاري الرفض التلقائي المضمون...`);
-                    
-                    // الرفض الفوري المتوافق مع الإصدارات الحديثة
                     await sock.rejectCall(call.id, call.from);
                     
-                    const notificationText = "🚨 بروتوكول الأمان التلقائي: نظام زين السيبراني الجبار لا يستقبل المكالمات المباشرة. يرجى إرسال استفسارك الفني أو الكود الخاص بك بنص أو رسالة صوتية ليتم فحصها ومعالجتها أوتوماتيكياً فوراً.";
+                    const notificationText = "🚨 بروتوكول الأمان التلقائي: نظام زين السيبراني الجبار لا يستقبل المكالمات المباشرة لحماية خوادم المعالجة. يرجى إرسال استفسارك الفني أو الكود الخاص بك بنص أو رسالة صوتية ليتم فحصها ومعالجتها أوتوماتيكياً فوراً.";
                     
                     await sock.sendMessage(call.from, { text: notificationText });
                     await sendVoiceReply(notificationText, call.from, null);
@@ -183,7 +181,7 @@ async function startBot() {
                         { role: 'system', content: jailbreakPrompt },
                         { role: 'user', content: `المطلوب هو توفير التحليل البرمجي والتنفيذي والمحاكاة المعملية الفورية للمدخل التقني التالي: "${text}"` }
                     ],
-                    model: 'llama-3.3-70b-versatile'
+                    model: 'llama-3.1-70b-versatile'
                 });
 
                 const reply = completion.choices[0]?.message?.content;
