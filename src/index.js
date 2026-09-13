@@ -179,7 +179,7 @@ async function startBot() {
                         },
                         { role: 'user', content: text }
                     ],
-                    model: 'llama3-70b-8192'
+                    model: 'llama-3.3-70b-specdec'
 
 
                 });
