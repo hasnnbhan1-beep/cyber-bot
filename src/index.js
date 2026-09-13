@@ -111,7 +111,7 @@ async function startBot() {
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             try {
                 if (type !== 'notify') return;
-                const msg = messages;
+                const msg = messages[0];
                 if (!msg?.message) return;
 
                 const from = msg.key.remoteJid;
