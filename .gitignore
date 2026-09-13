@@ -1,0 +1,7 @@
+node_modules/
+session/
+.env
+*.zip
+qrcode.png
+*.log
+config.txt
