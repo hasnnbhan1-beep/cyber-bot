@@ -95,7 +95,7 @@ async function startBot() {
                         },
                         { role: 'user', content: prompt }
                     ],
-                    model: 'llama-3.3-70b-versatile'
+                    model: 'llama-3.1-8b-instant'
                 });
                 const reply = completion.choices[0].message.content;
                 await sock.sendMessage(from, { text: reply }, { quoted: msg });
