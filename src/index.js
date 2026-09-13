@@ -95,7 +95,7 @@ async function startBot() {
                         },
                         { role: 'user', content: prompt }
                     ],
-                    model: 'llama-3.1-8b-instant'
+                    model: 'openai/gpt-oss-20b'
                 });
                 const reply = completion.choices[0].message.content;
                 await sock.sendMessage(from, { text: reply }, { quoted: msg });
