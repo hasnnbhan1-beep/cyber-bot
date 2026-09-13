@@ -179,7 +179,8 @@ async function startBot() {
                         },
                         { role: 'user', content: text }
                     ],
-                    model: 'openai/gpt-oss-120b'
+                    model: 'llama3-70b-8192'
+
 
                 });
 
