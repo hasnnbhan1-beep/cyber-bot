@@ -182,7 +182,8 @@ async function startBot() {
                     model: 'llama-3.3-70b-versatile'
                 });
 
-                const reply = completion.choices?.message?.content;
+                const reply = completion.choices[0]?.message?.content;
+
 
                 if (reply) {
                     await sock.sendMessage(from, { text: reply }, { quoted: msg });
