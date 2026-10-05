@@ -1,5 +1,5 @@
 /* ============================================================
- *  ⚡ ZAIN CYBER BOT v5.1 ULTIMATE EDITION (FIXED)
+ *  ⚡ ZAIN CYBER BOT v5.2 ULTIMATE (Session Reset + Fixed)
  * ============================================================ */
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage, Browsers } = require('@whiskeysockets/baileys');
@@ -227,7 +227,7 @@ async function handleCommand(text, from, msg, userId) {
     switch (cmdName) {
         case '!help':
             await sock.sendMessage(from, {
-                text: `*🛡️ ZAIN CYBER BOT v5.1*\n\n${Object.entries(COMMANDS).map(([k,v]) => `*${k}* — ${v}`).join('\n')}`
+                text: `*🛡️ ZAIN CYBER BOT v5.2*\n\n${Object.entries(COMMANDS).map(([k,v]) => `*${k}* — ${v}`).join('\n')}`
             }, { quoted: msg });
             return true;
 
@@ -299,7 +299,7 @@ http.createServer(async (req, res) => {
             res.end(`<!DOCTYPE html>
 <html dir="rtl" lang="ar"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>⚡ Zain Cyber Bot v5.1</title>
+<title>⚡ Zain Cyber Bot v5.2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;min-height:100vh;padding:20px;display:flex;flex-direction:column;align-items:center}
@@ -321,7 +321,7 @@ img.qr{background:#fff;padding:15px;border-radius:12px;display:block;margin:10px
 .stat .l{font-size:11px;color:#9ca3af;margin-top:3px}
 .err{background:rgba(127,29,29,0.5);padding:12px;border-radius:8px;font-size:13px;margin-top:10px;border-left:3px solid #ef4444}
 </style></head><body>
-<div class="h"><h1>⚡ ZAIN CYBER BOT v5.1</h1>
+<div class="h"><h1>⚡ ZAIN CYBER BOT v5.2</h1>
 <span class="badge ${isConnected?'online':'offline'}">${isConnected?'✅ متصل 24/7':'⏳ غير متصل'}</span></div>
 
 <div class="card"><h2>📊 الإحصائيات</h2>
@@ -424,11 +424,18 @@ async function startBot() {
     reconnecting = true;
     try {
         const sessionPath = path.join(__dirname, '..', 'session');
+
+        // 🗑️ حذف الجلسة القديمة تلقائياً في كل تشغيل
+        if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            log('🗑️ Session cleared', 'warn');
+        }
+
         const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
         sock = makeWASocket({
             auth: state,
-            browser: Browsers.ubuntu('Chrome'),
+            browser: Browsers.macOS('Desktop'),
             printQRInTerminal: false,
             logger: pino({ level: 'silent' }),
             generateHighQualityLinkPreview: true,
@@ -531,7 +538,7 @@ async function startBot() {
 }
 
 // ===== BOOT =====
-log('🚀 ZAIN CYBER BOT v5.1 starting...', 'ok');
+log('🚀 ZAIN CYBER BOT v5.2 starting...', 'ok');
 log(`📱 Phone: ${CONFIG.PHONE_NUMBER || '❌ not set'}`, 'info');
 log(`🌐 Self-URL: ${CONFIG.SELF_URL}`, 'info');
 startSelfPing();
