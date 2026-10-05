@@ -1,6 +1,6 @@
 /* ============================================================
- *  ⚡ ZAIN CYBER BOT v6.0 SPEED EDITION
- *  ⚡ QR-First  |  Fast Boot  |  24/7 Keep-Alive
+ *  ⚡ ZAIN BOT v8.0 - PAIRING CODE + QR BOTH
+ *  ⚡ Fast | Dual Display | Auto-Refresh | 24/7
  * ============================================================ */
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage, Browsers } = require('@whiskeysockets/baileys');
@@ -13,7 +13,6 @@ const fs = require('fs');
 const path = require('path');
 const pino = require('pino');
 
-// ===== CONFIG =====
 const CONFIG = {
     GROQ_API_KEY: process.env.GROQ_API_KEY,
     PHONE_NUMBER: process.env.PHONE_NUMBER || '',
@@ -22,9 +21,7 @@ const CONFIG = {
     AI_MODEL: 'llama-3.3-70b-versatile',
     STT_MODEL: 'whisper-large-v3-turbo',
     TTS_VOICE: 'ar-EG-SalmaNeural',
-    MAX_HISTORY: 8,
-    PING_INTERVAL: 25000,
-    RECONNECT_BASE: 2000
+    PING_INTERVAL: 25000
 };
 
 const PORT = CONFIG.PORT;
@@ -32,36 +29,22 @@ if (!CONFIG.GROQ_API_KEY) { console.error('❌ GROQ_API_KEY missing!'); process.
 
 const groq = new Groq({ apiKey: CONFIG.GROQ_API_KEY, timeout: 60000, maxRetries: 3 });
 
-// ===== STATE =====
-let currentQR = null;
-let currentQRDataUrl = null;
 let currentPairCode = null;
+let currentQRDataUrl = null;
+let codeTimestamp = 0;
 let sock = null;
 let isConnected = false;
 let lastError = '';
 let reconnecting = false;
-let reconnectAttempts = 0;
+let codeRenewTimer = null;
 const startTime = Date.now();
 
-const metrics = {
-    totalMessages: 0,
-    totalReplies: 0,
-    totalErrors: 0,
-    totalVoiceReplies: 0,
-    totalVoiceTranscribed: 0,
-    avgResponseTime: 0,
-    responseTimes: [],
-    pingsSent: 0,
-    pingsFailed: 0
-};
-
+const metrics = { totalMessages: 0, totalReplies: 0, totalErrors: 0, pingsSent: 0, pingsFailed: 0 };
 const userHistory = new Map();
-const responseCache = new Map();
 const voiceEnabled = new Map();
 
-// ===== UTILS =====
 function log(msg, type = 'info') {
-    const icons = { info: 'ℹ️', ok: '✅', warn: '⚠️', err: '❌', ping: '💓', qr: '📱' };
+    const icons = { info: 'ℹ️', ok: '✅', warn: '⚠️', err: '❌', ping: '💓', code: '🔑' };
     console.log(`[${new Date().toISOString()}] ${icons[type] || '•'} ${msg}`);
 }
 
@@ -70,37 +53,12 @@ function escapeXml(s) {
 }
 
 function formatUptime(sec) {
-    const d = Math.floor(sec / 86400);
-    const h = Math.floor((sec % 86400) / 3600);
+    const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
-    if (d > 0) return `${d}d ${h}h`;
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
 }
 
-function addToHistory(userId, role, content) {
-    const hist = userHistory.get(userId) || [];
-    hist.push({ role, content });
-    if (hist.length > CONFIG.MAX_HISTORY * 2) hist.shift();
-    userHistory.set(userId, hist);
-    return hist;
-}
-
-function getCachedResponse(key) {
-    const cached = responseCache.get(key);
-    if (cached && Date.now() - cached.time < 300000) return cached.response;
-    return null;
-}
-
-function cacheResponse(key, response) {
-    responseCache.set(key, { response, time: Date.now() });
-    if (responseCache.size > 300) {
-        const oldest = [...responseCache.entries()].sort((a,b) => a[1].time - b[1].time).slice(0, 100);
-        oldest.forEach(([k]) => responseCache.delete(k));
-    }
-}
-
-// ===== TTS (Optimized) =====
 async function sendVoiceReply(text, jid, quotedMsg) {
     let audioFilePath = null;
     try {
@@ -117,13 +75,11 @@ async function sendVoiceReply(text, jid, quotedMsg) {
                 mimetype: 'audio/ogg; codecs=opus',
                 ptt: true
             }, { quoted: quotedMsg });
-            metrics.totalVoiceReplies++;
         }
     } catch (err) { log('TTS: ' + err.message, 'warn'); }
     finally { if (audioFilePath && fs.existsSync(audioFilePath)) { try { fs.unlinkSync(audioFilePath); } catch (e) {} } }
 }
 
-// ===== STT (Optimized) =====
 async function transcribeAudio(msg) {
     let audioPath = null;
     try {
@@ -141,21 +97,22 @@ async function transcribeAudio(msg) {
             body: formData
         });
         const result = await response.json();
-        if (result.text) metrics.totalVoiceTranscribed++;
         return result.text || null;
     } catch (err) { log('STT: ' + err.message, 'warn'); return null; }
     finally { if (audioPath && fs.existsSync(audioPath)) { try { fs.unlinkSync(audioPath); } catch (e) {} } }
 }
 
-// ===== AI =====
 async function askAI(userText, userId) {
-    const t0 = Date.now();
     try {
-        const history = addToHistory(userId, 'user', userText);
+        const hist = userHistory.get(userId) || [];
+        hist.push({ role: 'user', content: userText });
+        if (hist.length > 16) hist.shift();
+        userHistory.set(userId, hist);
+
         const completion = await groq.chat.completions.create({
             messages: [
-                { role: 'system', content: 'أنت "زين" - مساعد ذكي متطور. تجيب بالعربية الفصحى مع رموز تعبيرية. خبير في الأمن السيبراني والبرمجة.' },
-                ...history.slice(-CONFIG.MAX_HISTORY)
+                { role: 'system', content: 'أنت "زين" - مساعد ذكي متطور. تجيب بالعربية الفصحى مع رموز تعبيرية.' },
+                ...hist.slice(-8)
             ],
             model: CONFIG.AI_MODEL,
             temperature: 0.7,
@@ -163,11 +120,8 @@ async function askAI(userText, userId) {
         });
         const reply = completion.choices?.[0]?.message?.content || null;
         if (reply) {
-            addToHistory(userId, 'assistant', reply);
-            const elapsed = Date.now() - t0;
-            metrics.responseTimes.push(elapsed);
-            if (metrics.responseTimes.length > 50) metrics.responseTimes.shift();
-            metrics.avgResponseTime = Math.round(metrics.responseTimes.reduce((a,b)=>a+b,0) / metrics.responseTimes.length);
+            hist.push({ role: 'assistant', content: reply });
+            userHistory.set(userId, hist);
         }
         return reply;
     } catch (err) { log('AI: ' + err.message, 'err'); metrics.totalErrors++; return null; }
@@ -181,71 +135,122 @@ http.createServer(async (req, res) => {
         if (url === '/') {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             const up = Math.floor((Date.now() - startTime) / 1000);
+            const codeAge = currentPairCode ? Math.floor((Date.now() - codeTimestamp) / 1000) : 0;
+            const codeRemaining = currentPairCode ? Math.max(0, 55 - codeAge) : 0;
+            const qrImg = currentQRDataUrl || '';
 
             res.end(`<!DOCTYPE html>
 <html dir="rtl" lang="ar"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>⚡ Zain Bot v6.0</title>
+<title>🔑 Zain Bot v8.0</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;min-height:100vh;padding:15px;display:flex;flex-direction:column;align-items:center}
 .h{text-align:center;margin-bottom:15px}
-.h h1{font-size:24px;background:linear-gradient(90deg,#a78bfa,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.badge{display:inline-block;padding:6px 16px;border-radius:20px;font-weight:bold;font-size:13px;margin-top:8px}
+.h h1{font-size:22px;background:linear-gradient(90deg,#a78bfa,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.badge{display:inline-block;padding:6px 16px;border-radius:20px;font-weight:bold;font-size:13px;margin-top:6px}
 .online{background:#10b981}.offline{background:#ef4444}
-.card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:18px;margin:10px 0;width:100%;max-width:480px}
-.card h2{font-size:17px;margin-bottom:12px;color:#a78bfa}
-.code{background:#000;color:#10b981;padding:18px;border-radius:10px;font-size:28px;font-weight:bold;text-align:center;letter-spacing:6px;font-family:monospace;margin:8px 0;cursor:pointer}
-.hint{font-size:12px;color:#9ca3af;line-height:1.7;margin-top:8px}
-.btn{display:inline-block;background:#7c3aed;color:#fff;padding:10px 20px;border-radius:8px;font-weight:bold;margin:5px 3px;border:none;cursor:pointer;font-size:14px}
-.btn-g{background:#10b981}
-.btn-r{background:#ef4444}
-img.qr{background:#fff;padding:12px;border-radius:12px;display:block;margin:8px auto;max-width:280px;width:100%}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.stat{background:rgba(255,255,255,0.05);padding:10px;border-radius:8px;text-align:center}
-.stat .n{font-size:16px;font-weight:bold;color:#a78bfa}
-.stat .l{font-size:10px;color:#9ca3af;margin-top:2px}
-.err{background:rgba(127,29,29,0.5);padding:10px;border-radius:8px;font-size:12px;margin-top:8px;border-left:3px solid #ef4444}
-.reload{position:fixed;bottom:20px;right:20px;background:#7c3aed;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;box-shadow:0 4px 12px rgba(124,58,237,0.5);border:none;color:#fff}
+.card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:18px;margin:10px 0;width:100%;max-width:480px}
+.card h2{font-size:16px;margin-bottom:10px;color:#a78bfa;text-align:center}
+.code-box{background:#000;border:3px solid #10b981;border-radius:14px;padding:20px 10px;text-align:center;margin:10px 0;box-shadow:0 0 25px rgba(16,185,129,0.5)}
+.code{color:#10b981;font-size:34px;font-weight:900;letter-spacing:5px;font-family:'Courier New',monospace;user-select:all;cursor:pointer;word-break:break-all}
+.code:hover{color:#34d399}
+.countdown{margin-top:8px;font-size:13px;color:#fbbf24;font-weight:bold}
+.progress{height:5px;background:#1f2937;border-radius:3px;margin-top:6px;overflow:hidden}
+.progress-bar{height:100%;background:linear-gradient(90deg,#10b981,#34d399);transition:width 1s linear;border-radius:3px}
+.copy-btn{background:#10b981;padding:12px;font-size:15px;width:100%;border-radius:10px;border:none;color:#fff;font-weight:bold;cursor:pointer;margin-top:6px}
+.copy-btn:active{background:#059669}
+.qr-box{background:#fff;padding:12px;border-radius:12px;display:block;margin:10px auto;max-width:250px;width:100%}
+.step{background:rgba(255,255,255,0.03);padding:10px;border-radius:8px;margin:5px 0;font-size:13px;line-height:1.6}
+.step b{color:#a78bfa}
+.err{background:rgba(127,29,29,0.5);padding:10px;border-radius:8px;font-size:12px;border-left:3px solid #ef4444;margin-top:8px}
+.loading{text-align:center;padding:25px;color:#9ca3af}
+.spinner{display:inline-block;width:35px;height:35px;border:3px solid #374151;border-top-color:#a78bfa;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.divider{text-align:center;color:#6b7280;font-size:12px;margin:8px 0;font-weight:bold}
+.stats-bar{text-align:center;font-size:11px;color:#6b7280;margin-top:10px;line-height:1.6}
 </style></head><body>
-<div class="h"><h1>⚡ ZAIN BOT v6.0</h1>
+<div class="h"><h1>⚡ ZAIN BOT v8.0</h1>
 <span class="badge ${isConnected?'online':'offline'}">${isConnected?'✅ متصل 24/7':'⏳ ينتظر الربط'}</span></div>
 
-<div class="card"><h2>📊 الحالة</h2>
-<div class="stats">
-<div class="stat"><div class="n">${formatUptime(up)}</div><div class="l">التشغيل</div></div>
-<div class="stat"><div class="n">${metrics.totalMessages}</div><div class="l">رسائل</div></div>
-<div class="stat"><div class="n">${metrics.totalReplies}</div><div class="l">ردود</div></div>
-</div></div>
+${isConnected ? `
+<div class="card" style="text-align:center">
+<h2>🎉 تم الربط بنجاح!</h2>
+<p style="margin-top:10px;line-height:1.8;font-size:14px">البوت متصل بواتساب ويعمل الآن<br>أرسل <b style="color:#10b981">!help</b> لأي محادثة</p>
+</div>
+` : currentPairCode ? `
+<div class="card">
+<h2>🔑 رمز الربط (الأسرع)</h2>
+<div class="code-box" onclick="copyCode()">
+<div class="code" id="code">${currentPairCode}</div>
+<div class="countdown">⏱️ متبقي: <span id="timer">${codeRemaining}</span> ثانية</div>
+<div class="progress"><div class="progress-bar" id="bar" style="width:${(codeRemaining/55)*100}%"></div></div>
+</div>
+<button class="copy-btn" onclick="copyCode()">📋 نسخ الرمز</button>
+<div class="step">
+<b>1️⃣</b> واتساب ⚙️ → الأجهزة المرتبطة<br>
+<b>2️⃣</b> اضغط "ربط جهاز"<br>
+<b>3️⃣</b> اختر <b>"الربط برقم الهاتف"</b><br>
+<b>4️⃣</b> الصق الرمز: <b style="color:#10b981">${currentPairCode}</b>
+</div>
+</div>
 
-${currentQRDataUrl ? `
-<div class="card"><h2>📱 امسح QR للربط (الأسرع)</h2>
-<img class="qr" src="${currentQRDataUrl}">
-<div class="hint"><b>⚡ الطريقة الأسرع والأكثر ضماناً:</b><br>
-1️⃣ افتح <b>هذه الصفحة</b> على جهاز آخر (كمبيوتر/تابلت/هاتف صديق)<br>
-2️⃣ على هاتفك: واتساب ← الإعدادات ← الأجهزة المرتبطة<br>
-3️⃣ اضغط "ربط جهاز" ← امسح الرمز أعلاه</div></div>` : ''}
+<div class="divider">↓ أو استخدم QR ↓</div>
 
-${currentPairCode ? `
-<div class="card"><h2>🔑 أو استخدم رمز الربط</h2>
-<div class="code" onclick="navigator.clipboard.writeText('${currentPairCode}');alert('✅ تم النسخ')">${currentPairCode}</div>
-<button class="btn btn-g" onclick="navigator.clipboard.writeText('${currentPairCode}');alert('✅ تم النسخ')">📋 نسخ الرمز</button>
-<div class="hint">
-1️⃣ واتساب ← الإعدادات<br>
-2️⃣ الأجهزة المرتبطة ← ربط جهاز<br>
-3️⃣ اختر "الربط برقم الهاتف"<br>
-4️⃣ أدخل الرمز</div></div>` : ''}
-
-${!currentQRDataUrl && !currentPairCode && !isConnected ? `
-<div class="card"><h2>⏳ جاري التحميل...</h2>
-<p class="hint">انتظر 10-20 ثانية ثم اضغط تحديث</p></div>` : ''}
+<div class="card">
+<h2>📱 QR Code</h2>
+${qrImg ? `<img class="qr-box" src="${qrImg}" alt="QR">` : `<div class="loading"><div class="spinner"></div><p>جاري توليد QR...</p></div>`}
+<div class="step" style="font-size:12px">
+<b>💡 نصيحة:</b> إذا كنت تستخدم هاتفاً واحداً،<br>
+التقط <b>screenshot</b> للـ QR ثم افتحه في تطبيق آخر لمسحه.<br>
+أو استخدم <b>الرمز أعلاه</b> (أسهل وأسرع).
+</div>
+</div>
+` : `
+<div class="card">
+<div class="loading">
+<div class="spinner"></div>
+<h2 style="color:#a78bfa">⏳ جاري التوليد...</h2>
+<p style="margin-top:8px;font-size:13px">انتظر 10-15 ثانية</p>
+<button class="copy-btn" style="margin-top:15px" onclick="location.reload()">🔄 تحديث</button>
+</div>
+</div>
+`}
 
 ${lastError ? `<div class="err">⚠️ ${lastError}</div>` : ''}
 
-<button class="reload" onclick="location.reload()">🔄</button>
+<div class="stats-bar">
+⏱️ التشغيل: ${formatUptime(up)} | 💬 ${metrics.totalMessages} رسالة | 💓 ${metrics.pingsSent} Ping
+</div>
+
 <script>
-  // تحديث تلقائي كل 20 ثانية إذا لم يكن متصلاً
-  ${!isConnected ? 'setTimeout(()=>location.reload(),20000);' : ''}
+function copyCode() {
+    const code = document.getElementById('code')?.innerText;
+    if (!code) return;
+    navigator.clipboard.writeText(code).then(() => {
+        alert('✅ تم نسخ الرمز:\\n\\n' + code + '\\n\\nافتح واتساب الآن وأدخله!');
+    }).catch(() => {
+        const t = document.createElement('textarea');
+        t.value = code;
+        document.body.appendChild(t);
+        t.select();
+        document.execCommand('copy');
+        document.body.removeChild(t);
+        alert('✅ تم النسخ: ' + code);
+    });
+}
+
+let remaining = ${codeRemaining};
+setInterval(() => {
+    remaining--;
+    const t = document.getElementById('timer');
+    const b = document.getElementById('bar');
+    if (t) t.innerText = Math.max(0, remaining);
+    if (b) b.style.width = Math.max(0, (remaining/55)*100) + '%';
+    if (remaining <= 0) location.reload();
+}, 1000);
+
+setTimeout(() => location.reload(), 55000);
 </script>
 </body></html>`);
         }
@@ -253,13 +258,12 @@ ${lastError ? `<div class="err">⚠️ ${lastError}</div>` : ''}
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
             res.end(JSON.stringify({
                 connected: isConnected,
-                hasQR: !!currentQR,
-                hasPairCode: !!currentPairCode,
                 pairCode: currentPairCode,
+                hasQR: !!currentQRDataUrl,
+                codeAge: currentPairCode ? Math.floor((Date.now() - codeTimestamp) / 1000) : 0,
                 phone: CONFIG.PHONE_NUMBER,
                 uptime: Math.floor((Date.now() - startTime) / 1000),
-                metrics,
-                error: lastError
+                metrics, error: lastError
             }));
         }
         else if (url === '/health' || url === '/ping') {
@@ -275,10 +279,7 @@ function startSelfPing() {
     const pingOnce = () => {
         https.get(`${CONFIG.SELF_URL}/health?t=${Date.now()}`, (res) => {
             res.on('data', () => {});
-            res.on('end', () => {
-                if (res.statusCode === 200) metrics.pingsSent++;
-                else metrics.pingsFailed++;
-            });
+            res.on('end', () => { if (res.statusCode === 200) metrics.pingsSent++; else metrics.pingsFailed++; });
         }).on('error', () => { metrics.pingsFailed++; });
     };
     setInterval(pingOnce, CONFIG.PING_INTERVAL);
@@ -291,7 +292,35 @@ function startLocalPing() {
     }, 60000);
 }
 
-// ===== BOT START (Fast + QR Priority) =====
+// ===== REQUEST PAIRING CODE =====
+async function requestPairingCode(socket) {
+    if (isConnected || !CONFIG.PHONE_NUMBER) return;
+
+    try {
+        const cleanNum = CONFIG.PHONE_NUMBER.replace(/[^0-9]/g, '');
+        log(`🔑 Requesting pairing code for ${cleanNum}...`, 'code');
+        const code = await socket.requestPairingCode(cleanNum);
+        currentPairCode = code;
+        codeTimestamp = Date.now();
+        lastError = '';
+        log(`✅ PAIRING CODE: ${code}`, 'code');
+
+        if (codeRenewTimer) clearTimeout(codeRenewTimer);
+        codeRenewTimer = setTimeout(() => {
+            if (!isConnected && currentPairCode === code) {
+                log('⏰ Code expired, renewing...', 'warn');
+                currentPairCode = null;
+                requestPairingCode(socket);
+            }
+        }, 56000);
+    } catch (err) {
+        log('Pairing failed: ' + err.message, 'err');
+        lastError = 'فشل الرمز: ' + err.message;
+        if (!isConnected) setTimeout(() => requestPairingCode(socket), 6000);
+    }
+}
+
+// ===== BOT START =====
 async function startBot() {
     if (reconnecting) return;
     reconnecting = true;
@@ -301,12 +330,12 @@ async function startBot() {
 
         sock = makeWASocket({
             auth: state,
-            browser: Browsers.ubuntu('Chrome'),
+            browser: Browsers.macOS('Desktop'),
             printQRInTerminal: false,
             logger: pino({ level: 'silent' }),
-            generateHighQualityLinkPreview: false,   // ⚡ أسرع
+            generateHighQualityLinkPreview: false,
             syncFullHistory: false,
-            markOnlineOnConnect: false,               // ⚡ أسرع
+            markOnlineOnConnect: false,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 30000,
             retryRequestDelayMs: 1000,
@@ -316,53 +345,40 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // ⚡ الأولوية للـ QR — الرمز فقط إذا لم يأتِ QR خلال 8 ثوان
-        let qrReceived = false;
+        // ⚡ طلب الرمز فوراً
         if (!state.creds.registered && CONFIG.PHONE_NUMBER) {
-            setTimeout(() => {
-                if (!qrReceived && !state.creds.registered && !isConnected) {
-                    log('🔑 No QR received, requesting pairing code...', 'info');
-                    requestPairingCode(sock);
-                }
-            }, 8000);
+            setTimeout(() => requestPairingCode(sock), 2500);
         }
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
 
-            if (qr) {
-                qrReceived = true;
-                currentQR = qr;
-                currentPairCode = null;
-                // ⚡ توليد QR بسرعة
+            // 📱 استقبال QR وتوليد صورة
+            if (qr && !isConnected) {
                 try {
-                    currentQRDataUrl = await qrcode.toDataURL(qr, { margin: 1, scale: 5, errorCorrectionLevel: 'M' });
-                    log('📱 QR generated (fast mode)', 'qr');
+                    currentQRDataUrl = await qrcode.toDataURL(qr, { margin: 1, scale: 5 });
+                    log('📱 QR generated', 'code');
                 } catch (e) { log('QR gen: ' + e.message, 'warn'); }
             }
 
             if (connection === 'close') {
-                currentQR = null;
-                currentQRDataUrl = null;
                 currentPairCode = null;
+                currentQRDataUrl = null;
                 isConnected = false;
                 reconnecting = false;
                 const code = lastDisconnect?.error?.output?.statusCode;
                 log(`❌ Disconnected (${code})`, 'err');
                 if (code !== DisconnectReason.loggedOut) {
-                    reconnectAttempts++;
-                    const delay = Math.min(CONFIG.RECONNECT_BASE * Math.pow(1.5, reconnectAttempts - 1), 30000);
-                    log(`🔄 Reconnect in ${Math.round(delay/1000)}s`, 'warn');
-                    setTimeout(startBot, delay);
+                    log('🔄 Reconnect in 3s...', 'warn');
+                    setTimeout(startBot, 3000);
                 }
             } else if (connection === 'open') {
-                currentQR = null;
-                currentQRDataUrl = null;
                 currentPairCode = null;
+                currentQRDataUrl = null;
                 isConnected = true;
                 lastError = '';
-                reconnectAttempts = 0;
                 reconnecting = false;
+                if (codeRenewTimer) clearTimeout(codeRenewTimer);
                 log('✅✅✅ BOT CONNECTED! ✅✅✅', 'ok');
             }
         });
@@ -375,61 +391,39 @@ async function startBot() {
                 const from = msg.key.remoteJid;
                 if (from.endsWith('@g.us')) return;
 
-                const userId = from;
                 metrics.totalMessages++;
-
                 let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
-                // Commands
-                if (text.startsWith('!')) {
-                    if (text === '!ping') {
-                        await sock.sendMessage(from, { text: '🏓 Pong!' }, { quoted: msg });
-                        return;
-                    }
-                    if (text === '!status') {
-                        const up = Math.floor((Date.now() - startTime) / 1000);
-                        await sock.sendMessage(from, { text: `📊 متصل: ${isConnected}\n⏱️ ${formatUptime(up)}\n💬 ${metrics.totalMessages} رسالة` }, { quoted: msg });
-                        return;
-                    }
-                    if (text === '!voice') {
-                        const curr = voiceEnabled.get(userId) || false;
-                        voiceEnabled.set(userId, !curr);
-                        await sock.sendMessage(from, { text: `🎙️ ${!curr ? 'مُفعّل ✅' : 'مُعطّل ❌'}` }, { quoted: msg });
-                        return;
-                    }
-                    if (text === '!help') {
-                        await sock.sendMessage(from, { text: `🛡️ *الأوامر*\n!ping - اختبار\n!status - الحالة\n!voice - صوت\n!clear - مسح` }, { quoted: msg });
-                        return;
-                    }
-                    if (text === '!clear') {
-                        userHistory.delete(userId);
-                        await sock.sendMessage(from, { text: '🗑️ تم المسح' }, { quoted: msg });
-                        return;
-                    }
+                if (text === '!ping') { await sock.sendMessage(from, { text: '🏓 Pong!' }, { quoted: msg }); return; }
+                if (text === '!status') {
+                    const up = Math.floor((Date.now() - startTime) / 1000);
+                    await sock.sendMessage(from, { text: `📊 متصل: ${isConnected}\n⏱️ ${formatUptime(up)}` }, { quoted: msg });
+                    return;
                 }
+                if (text === '!voice') {
+                    const curr = voiceEnabled.get(from) || false;
+                    voiceEnabled.set(from, !curr);
+                    await sock.sendMessage(from, { text: `🎙️ ${!curr ? 'مُفعّل ✅' : 'مُعطّل ❌'}` }, { quoted: msg });
+                    return;
+                }
+                if (text === '!help') {
+                    await sock.sendMessage(from, { text: `🛡️ الأوامر:\n!ping\n!status\n!voice\n!clear` }, { quoted: msg });
+                    return;
+                }
+                if (text === '!clear') { userHistory.delete(from); await sock.sendMessage(from, { text: '🗑️ تم' }, { quoted: msg }); return; }
 
-                // Voice
                 if (msg.message.audioMessage) {
                     await sock.sendMessage(from, { text: '🎧 تحليل...' }, { quoted: msg });
                     const t = await transcribeAudio(msg);
-                    if (t) text = t;
-                    else { await sock.sendMessage(from, { text: '❌ لم أفهم' }, { quoted: msg }); return; }
+                    if (t) text = t; else { await sock.sendMessage(from, { text: '❌ لم أفهم' }, { quoted: msg }); return; }
                 }
 
                 if (!text || !text.trim()) return;
-                log(`📨 ${text.substring(0, 50)}`);
-
-                const cacheKey = `${userId}:${text.substring(0, 100)}`;
-                let reply = getCachedResponse(cacheKey);
-                if (!reply) {
-                    reply = await askAI(text, userId);
-                    if (reply) cacheResponse(cacheKey, reply);
-                }
-
+                const reply = await askAI(text, from);
                 if (reply) {
                     await sock.sendMessage(from, { text: reply }, { quoted: msg });
                     metrics.totalReplies++;
-                    if (voiceEnabled.get(userId)) await sendVoiceReply(reply, from, msg);
+                    if (voiceEnabled.get(from)) await sendVoiceReply(reply, from, msg);
                 }
             } catch (err) { log('Msg: ' + err.message, 'err'); metrics.totalErrors++; }
         });
@@ -442,26 +436,8 @@ async function startBot() {
     }
 }
 
-// ===== PAIRING CODE (Fallback) =====
-async function requestPairingCode(socket) {
-    if (isConnected || !CONFIG.PHONE_NUMBER) return;
-    try {
-        const code = await socket.requestPairingCode(CONFIG.PHONE_NUMBER.replace(/[^0-9]/g, ''));
-        currentPairCode = code;
-        log(`🔑 PAIRING CODE: ${code}`, 'ok');
-        setTimeout(() => {
-            if (currentPairCode === code && !isConnected) {
-                currentPairCode = null;
-                requestPairingCode(socket);
-            }
-        }, 55000);
-    } catch (err) {
-        log('Pairing failed: ' + err.message, 'err');
-    }
-}
-
 // ===== BOOT =====
-log('🚀 ZAIN BOT v6.0 SPEED starting...', 'ok');
+log('🚀 ZAIN BOT v8.0 - Pairing + QR starting...', 'ok');
 startSelfPing();
 startLocalPing();
 startBot();
