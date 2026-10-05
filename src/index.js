@@ -1,17 +1,5 @@
 /* ============================================================
- *  ⚡ ZAIN CYBER BOT v5.0 ULTIMATE EDITION
- *  
- *  Features:
- *  - 20+ Advanced Commands
- *  - Multi-layer Anti-Sleep (Self-Ping + Local Ping + External)
- *  - Super Fast Message Queue Processing
- *  - Rate Limiting & Anti-Spam
- *  - Response Caching
- *  - Auto-Recovery with Exponential Backoff
- *  - Professional Admin Dashboard
- *  - TTS + STT (Voice In/Out)
- *  - Image Analysis
- *  - Real-time Statistics
+ *  ⚡ ZAIN CYBER BOT v5.1 ULTIMATE EDITION (FIXED)
  * ============================================================ */
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage, Browsers } = require('@whiskeysockets/baileys');
@@ -31,7 +19,6 @@ const CONFIG = {
     PORT: process.env.PORT || 10000,
     SELF_URL: process.env.SELF_URL || 'https://cyber-bot-urcz.onrender.com',
     AI_MODEL: 'llama-3.3-70b-versatile',
-    VISION_MODEL: 'llama-3.2-11b-vision-preview',
     STT_MODEL: 'whisper-large-v3-turbo',
     TTS_VOICE: 'ar-EG-SalmaNeural',
     MAX_HISTORY: 10,
@@ -41,6 +28,8 @@ const CONFIG = {
     PING_INTERVAL: 25000,
     RECONNECT_BASE: 3000
 };
+
+const PORT = CONFIG.PORT;
 
 if (!CONFIG.GROQ_API_KEY) { console.error('❌ GROQ_API_KEY missing!'); process.exit(1); }
 
@@ -68,16 +57,14 @@ const metrics = {
     totalCommands: 0,
     avgResponseTime: 0,
     responseTimes: [],
-    uptime: 0,
     pingsSent: 0,
-    pingsFailed: 0,
-    lastPing: null
+    pingsFailed: 0
 };
 
-// ===== USER HISTORY =====
 const userHistory = new Map();
 const userRateLimit = new Map();
 const responseCache = new Map();
+const voiceEnabled = new Map();
 
 // ===== UTILS =====
 function log(msg, type = 'info') {
@@ -123,7 +110,6 @@ function addToHistory(userId, role, content) {
 
 function cacheResponse(key, response) {
     responseCache.set(key, { response, time: Date.now() });
-    // Cleanup old cache
     if (responseCache.size > 500) {
         const now = Date.now();
         for (const [k, v] of responseCache) {
@@ -191,7 +177,7 @@ async function askAI(userText, userId, systemExtra = '') {
     try {
         const history = addToHistory(userId, 'user', userText);
         const messages = [
-            { role: 'system', content: `أنت "زين" - مساعد ذكاء اصطناعي متطور من فريق Zain Cyber.\n\nقواعدك:\n- تجيب بالعربية الفصحى مع رموز تعبيرية\n- أنت خبير في: الأمن السيبراني، البرمجة، التقنية، حل المشكلات\n- إجاباتك دقيقة ومفيدة ومنظمة\n- استخدم التنسيق (نقاط، عريض، كود) عند الحاجة${systemExtra}` },
+            { role: 'system', content: `أنت "زين" - مساعد ذكاء اصطناعي متطور من فريق Zain Cyber. تجيب بالعربية الفصحى مع رموز تعبيرية. أنت خبير في: الأمن السيبراني، البرمجة، التقنية.${systemExtra}` },
             ...history.slice(-CONFIG.MAX_HISTORY)
         ];
         
@@ -221,29 +207,27 @@ async function askAI(userText, userId, systemExtra = '') {
 // ===== COMMANDS =====
 const COMMANDS = {
     '!help': 'قائمة الأوامر',
-    '!ping': 'اختبار سرعة الاستجابة',
+    '!ping': 'اختبار سرعة',
     '!status': 'حالة البوت',
-    '!stats': 'إحصائيات متقدمة',
-    '!ai': 'استعلام مباشر من الذكاء الاصطناعي',
+    '!stats': 'إحصائيات',
     '!voice': 'تشغيل/إيقاف الرد الصوتي',
     '!clear': 'حذف سجل المحادثة',
-    '!time': 'الوقت الحالي',
-    '!date': 'التاريخ الحالي',
+    '!time': 'الوقت',
+    '!date': 'التاريخ',
     '!id': 'معرف المحادثة',
     '!echo': 'إعادة النص'
 };
-
-const voiceEnabled = new Map();
 
 async function handleCommand(text, from, msg, userId) {
     metrics.totalCommands++;
     const cmd = text.trim().toLowerCase();
     const args = cmd.split(' ').slice(1).join(' ');
+    const cmdName = cmd.split(' ')[0];
 
-    switch (cmd.split(' ')[0]) {
+    switch (cmdName) {
         case '!help':
             await sock.sendMessage(from, {
-                text: `*🛡️ ZAIN CYBER BOT v5.0*\n\n${Object.entries(COMMANDS).map(([k,v]) => `*${k}* — ${v}`).join('\n')}\n\n_المميزات:_\n🎙️ ردود صوتية تلقائية\n🎧 تحويل الصوت لنص\n🧠 ذكاء اصطناعي متقدم\n⚡ استجابة فورية`
+                text: `*🛡️ ZAIN CYBER BOT v5.1*\n\n${Object.entries(COMMANDS).map(([k,v]) => `*${k}* — ${v}`).join('\n')}`
             }, { quoted: msg });
             return true;
 
@@ -256,7 +240,7 @@ async function handleCommand(text, from, msg, userId) {
         case '!status': {
             const up = Math.floor((Date.now() - startTime) / 1000);
             await sock.sendMessage(from, {
-                text: `📊 *حالة النظام*\n\n✅ الاتصال: ${isConnected ? 'متصل' : 'غير متصل'}\n⏱️ التشغيل: ${formatUptime(up)}\n💬 الرسائل: ${metrics.totalMessages}\n🎯 الردود: ${metrics.totalReplies}\n⚡ متوسط الاستجابة: ${metrics.avgResponseTime}ms`
+                text: `📊 *الحالة*\n✅ الاتصال: ${isConnected ? 'متصل' : 'غير متصل'}\n⏱️ التشغيل: ${formatUptime(up)}\n💬 الرسائل: ${metrics.totalMessages}\n⚡ الاستجابة: ${metrics.avgResponseTime}ms`
             }, { quoted: msg });
             return true;
         }
@@ -264,7 +248,7 @@ async function handleCommand(text, from, msg, userId) {
         case '!stats': {
             const up = Math.floor((Date.now() - startTime) / 1000);
             await sock.sendMessage(from, {
-                text: `📈 *إحصائيات شاملة*\n\n⏱️ التشغيل: ${formatUptime(up)}\n💬 إجمالي الرسائل: ${metrics.totalMessages}\n✅ الردود المرسلة: ${metrics.totalReplies}\n🎙️ ردود صوتية: ${metrics.totalVoiceReplies}\n🎧 أصوات مُحوّلة: ${metrics.totalVoiceTranscribed}\n⚙️ أوامر: ${metrics.totalCommands}\n❌ أخطاء: ${metrics.totalErrors}\n⚡ متوسط الاستجابة: ${metrics.avgResponseTime}ms\n💓 Ping ناجح: ${metrics.pingsSent}\n💔 Ping فاشل: ${metrics.pingsFailed}`
+                text: `📈 *إحصائيات*\n⏱️ ${formatUptime(up)}\n💬 رسائل: ${metrics.totalMessages}\n✅ ردود: ${metrics.totalReplies}\n🎙️ صوتيات: ${metrics.totalVoiceReplies}\n⚙️ أوامر: ${metrics.totalCommands}\n❌ أخطاء: ${metrics.totalErrors}\n💓 Ping: ${metrics.pingsSent}`
             }, { quoted: msg });
             return true;
         }
@@ -282,15 +266,15 @@ async function handleCommand(text, from, msg, userId) {
             return true;
 
         case '!time':
-            await sock.sendMessage(from, { text: `🕐 *الوقت:* ${new Date().toLocaleTimeString('ar-EG')}` }, { quoted: msg });
+            await sock.sendMessage(from, { text: `🕐 ${new Date().toLocaleTimeString('ar-EG')}` }, { quoted: msg });
             return true;
 
         case '!date':
-            await sock.sendMessage(from, { text: `📅 *التاريخ:* ${new Date().toLocaleDateString('ar-EG', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}` }, { quoted: msg });
+            await sock.sendMessage(from, { text: `📅 ${new Date().toLocaleDateString('ar-EG', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}` }, { quoted: msg });
             return true;
 
         case '!id':
-            await sock.sendMessage(from, { text: `🆔 *المعرف:* \`${from}\`` }, { quoted: msg });
+            await sock.sendMessage(from, { text: `🆔 \`${from}\`` }, { quoted: msg });
             return true;
 
         case '!echo':
@@ -315,24 +299,20 @@ http.createServer(async (req, res) => {
             res.end(`<!DOCTYPE html>
 <html dir="rtl" lang="ar"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="${!isConnected ? 20 : 300}">
-<title>⚡ Zain Cyber Bot v5.0</title>
+<title>⚡ Zain Cyber Bot v5.1</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',sans-serif;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;min-height:100vh;padding:20px;display:flex;flex-direction:column;align-items:center}
 .h{text-align:center;margin-bottom:20px}
 .h h1{font-size:26px;background:linear-gradient(90deg,#a78bfa,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:10px}
 .badge{display:inline-block;padding:8px 20px;border-radius:20px;font-weight:bold;font-size:14px}
-.online{background:#10b981;animation:pulse 2s infinite}
-.offline{background:#ef4444}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0.7)}50%{box-shadow:0 0 0 10px rgba(16,185,129,0)}}
+.online{background:#10b981}.offline{background:#ef4444}
 .card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:22px;margin:12px 0;width:100%;max-width:500px}
 .card h2{font-size:18px;margin-bottom:12px;color:#a78bfa}
-.code{background:#000;color:#10b981;padding:22px;border-radius:10px;font-size:32px;font-weight:bold;text-align:center;letter-spacing:8px;font-family:monospace;margin:10px 0;user-select:all;cursor:pointer;transition:0.3s}
-.code:hover{background:#065f46;transform:scale(1.02)}
+.code{background:#000;color:#10b981;padding:22px;border-radius:10px;font-size:32px;font-weight:bold;text-align:center;letter-spacing:8px;font-family:monospace;margin:10px 0;user-select:all;cursor:pointer}
+.code:hover{background:#065f46}
 .hint{font-size:13px;color:#9ca3af;line-height:1.8;margin-top:10px}
-.btn{display:inline-block;background:#7c3aed;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:bold;margin:8px 5px;border:none;cursor:pointer;font-size:15px;transition:0.2s}
-.btn:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(124,58,237,0.4)}
+.btn{display:inline-block;background:#7c3aed;color:#fff;padding:12px 24px;border-radius:10px;font-weight:bold;margin:8px 5px;border:none;cursor:pointer;font-size:15px}
 .btn-g{background:#10b981}
 img.qr{background:#fff;padding:15px;border-radius:12px;display:block;margin:10px auto;max-width:100%}
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
@@ -340,45 +320,37 @@ img.qr{background:#fff;padding:15px;border-radius:12px;display:block;margin:10px
 .stat .n{font-size:18px;font-weight:bold;color:#a78bfa}
 .stat .l{font-size:11px;color:#9ca3af;margin-top:3px}
 .err{background:rgba(127,29,29,0.5);padding:12px;border-radius:8px;font-size:13px;margin-top:10px;border-left:3px solid #ef4444}
-.footer{text-align:center;font-size:12px;color:#6b7280;margin-top:20px}
 </style></head><body>
-<div class="h"><h1>⚡ ZAIN CYBER BOT v5.0</h1>
+<div class="h"><h1>⚡ ZAIN CYBER BOT v5.1</h1>
 <span class="badge ${isConnected?'online':'offline'}">${isConnected?'✅ متصل 24/7':'⏳ غير متصل'}</span></div>
 
-<div class="card"><h2>📊 الإحصائيات المباشرة</h2>
+<div class="card"><h2>📊 الإحصائيات</h2>
 <div class="stats">
-<div class="stat"><div class="n">${formatUptime(up)}</div><div class="l">مدة التشغيل</div></div>
-<div class="stat"><div class="n">${metrics.totalMessages}</div><div class="l">الرسائل</div></div>
-<div class="stat"><div class="n">${metrics.totalReplies}</div><div class="l">الردود</div></div>
-<div class="stat"><div class="n">${metrics.avgResponseTime}ms</div><div class="l">سرعة الاستجابة</div></div>
-<div class="stat"><div class="n">${metrics.totalVoiceReplies}</div><div class="l">ردود صوتية</div></div>
-<div class="stat"><div class="n">${metrics.pingsSent}</div><div class="l">Ping ناجح</div></div>
+<div class="stat"><div class="n">${formatUptime(up)}</div><div class="l">التشغيل</div></div>
+<div class="stat"><div class="n">${metrics.totalMessages}</div><div class="l">رسائل</div></div>
+<div class="stat"><div class="n">${metrics.totalReplies}</div><div class="l">ردود</div></div>
+<div class="stat"><div class="n">${metrics.avgResponseTime}ms</div><div class="l">استجابة</div></div>
 </div></div>
 
 ${currentPairCode ? `
 <div class="card"><h2>🔑 رمز الربط</h2>
 <div class="code" onclick="navigator.clipboard.writeText('${currentPairCode}');this.style.background='#065f46';alert('✅ تم النسخ');">${currentPairCode}</div>
-<div class="hint"><b>⚠️ الرمز صالح 60 ثانية فقط!</b><br>
-1️⃣ واتساب ← الإعدادات ⚙️<br>
+<button class="btn btn-g" onclick="navigator.clipboard.writeText('${currentPairCode}');alert('✅ تم النسخ')">📋 نسخ</button>
+<div class="hint"><b>⚠️ صالح 60 ثانية!</b><br>
+1️⃣ واتساب ← الإعدادات<br>
 2️⃣ الأجهزة المرتبطة ← ربط جهاز<br>
 3️⃣ اختر <b>"الربط برقم الهاتف"</b><br>
-4️⃣ أدخل الرمز أعلاه</div></div>` : ''}
+4️⃣ أدخل الرمز</div></div>` : ''}
 
 ${qrImg ? `
 <div class="card"><h2>📱 QR Code</h2>
-<img class="qr" src="${qrImg}">
-<div class="hint">افتح الصفحة على جهاز آخر ثم امسح</div></div>` : ''}
+<img class="qr" src="${qrImg}"></div>` : ''}
 
 ${!currentQR && !currentPairCode && !isConnected ? `
 <div class="card"><h2>⏳ جاري التحميل...</h2>
-<p class="hint">التحديث التلقائي كل 20 ثانية</p></div>` : ''}
+<button class="btn" onclick="location.reload()">🔄 تحديث</button></div>` : ''}
 
 ${lastError ? `<div class="err">⚠️ ${lastError}</div>` : ''}
-
-<div class="footer">
-Powered by Groq AI • v5.0 ULTIMATE<br>
-Uptime: ${formatUptime(up)} | Messages: ${metrics.totalMessages}
-</div>
 </body></html>`);
         }
         else if (url === '/api/status') {
@@ -390,13 +362,9 @@ Uptime: ${formatUptime(up)} | Messages: ${metrics.totalMessages}
                 metrics, error: lastError, attempts: pairingAttempts
             }));
         }
-        else if (url === '/health') {
+        else if (url === '/health' || url === '/ping') {
             res.writeHead(200, { 'Content-Type': 'text/plain' });
             res.end('OK');
-        }
-        else if (url === '/ping') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ pong: true, time: Date.now(), uptime: process.uptime() }));
         }
         else { res.writeHead(404); res.end('404'); }
     } catch (e) { res.writeHead(500); res.end('Error'); }
@@ -404,12 +372,12 @@ Uptime: ${formatUptime(up)} | Messages: ${metrics.totalMessages}
 
 // ===== KEEP-ALIVE =====
 function startSelfPing() {
-    log(`💓 Self-Ping every ${CONFIG.PING_INTERVAL/1000}s → ${CONFIG.SELF_URL}`, 'ping');
+    log(`💓 Self-Ping every ${CONFIG.PING_INTERVAL/1000}s`, 'ping');
     const pingOnce = () => {
         https.get(`${CONFIG.SELF_URL}/health?t=${Date.now()}`, (res) => {
             res.on('data', () => {});
             res.on('end', () => {
-                if (res.statusCode === 200) { metrics.pingsSent++; metrics.lastPing = new Date().toISOString(); }
+                if (res.statusCode === 200) metrics.pingsSent++;
                 else metrics.pingsFailed++;
             });
         }).on('error', () => { metrics.pingsFailed++; });
@@ -491,10 +459,8 @@ async function startBot() {
                     reconnectAttempts++;
                     pairingAttempts = 0;
                     const delay = Math.min(CONFIG.RECONNECT_BASE * Math.pow(1.5, reconnectAttempts - 1), 60000);
-                    log(`🔄 Reconnect in ${Math.round(delay/1000)}s (attempt ${reconnectAttempts})`, 'warn');
+                    log(`🔄 Reconnect in ${Math.round(delay/1000)}s`, 'warn');
                     setTimeout(startBot, delay);
-                } else {
-                    log('🚫 Logged out - clear session folder', 'err');
                 }
             } else if (connection === 'open') {
                 currentQR = null; currentPairCode = null; isConnected = true;
@@ -515,19 +481,17 @@ async function startBot() {
                 metrics.totalMessages++;
 
                 if (!checkRateLimit(userId)) {
-                    await sock.sendMessage(from, { text: '⏸️ تمهّل قليلاً! تجاوزت الحد المسموح.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⏸️ تمهّل! تجاوزت الحد المسموح.' }, { quoted: msg });
                     return;
                 }
 
                 let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
-                // Commands
                 if (text.startsWith('!')) {
                     const handled = await handleCommand(text, from, msg, userId);
                     if (handled) return;
                 }
 
-                // Voice message
                 if (msg.message.audioMessage) {
                     await sock.sendMessage(from, { text: '🎧 جاري تحليل الصوت...' }, { quoted: msg });
                     const t = await transcribeAudio(msg);
@@ -538,7 +502,6 @@ async function startBot() {
                 if (!text || !text.trim()) return;
                 log(`📨 ${text.substring(0, 60)}`);
 
-                // Cache check
                 const cacheKey = `${userId}:${text}`;
                 let reply = getCachedResponse(cacheKey);
                 if (!reply) {
@@ -549,7 +512,6 @@ async function startBot() {
                 if (reply) {
                     await sock.sendMessage(from, { text: reply }, { quoted: msg });
                     metrics.totalReplies++;
-
                     if (voiceEnabled.get(userId)) {
                         await sendVoiceReply(reply, from, msg);
                     }
@@ -569,7 +531,7 @@ async function startBot() {
 }
 
 // ===== BOOT =====
-log('🚀 ZAIN CYBER BOT v5.0 ULTIMATE starting...', 'ok');
+log('🚀 ZAIN CYBER BOT v5.1 starting...', 'ok');
 log(`📱 Phone: ${CONFIG.PHONE_NUMBER || '❌ not set'}`, 'info');
 log(`🌐 Self-URL: ${CONFIG.SELF_URL}`, 'info');
 startSelfPing();
