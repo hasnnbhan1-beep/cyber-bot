@@ -1,5 +1,5 @@
 /* ============================================================
- *  ZAIN CYBER BOT v3.0 - QR + Pairing Code + Web Dashboard
+ *  ZAIN CYBER BOT v3.1 - FIXED PAIRING
  * ============================================================ */
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
@@ -15,7 +15,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const PHONE_NUMBER = process.env.PHONE_NUMBER || '';
 const PORT = process.env.PORT || 10000;
 
-if (!GROQ_API_KEY) { console.error('❌ GROQ_API_KEY missing!'); process.exit(1); }
+if (!GROQ_API_KEY) { console.error('GROQ_API_KEY missing!'); process.exit(1); }
 
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
@@ -24,13 +24,12 @@ let currentPairCode = null;
 let sock = null;
 let isConnected = false;
 let lastError = '';
+let pairingRequested = false;
 
-// ===== دالة تهريب النص =====
 function escapeXml(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
 
-// ===== إرسال رد صوتي =====
 async function sendVoiceReply(text, jid, quotedMsg) {
     let audioFilePath = null;
     try {
@@ -48,11 +47,10 @@ async function sendVoiceReply(text, jid, quotedMsg) {
                 ptt: true
             }, { quoted: quotedMsg });
         }
-    } catch (err) { console.log('⚠️ TTS:', err.message); }
+    } catch (err) { console.log('TTS:', err.message); }
     finally { if (audioFilePath && fs.existsSync(audioFilePath)) { try { fs.unlinkSync(audioFilePath); } catch (e) {} } }
 }
 
-// ===== تحويل الصوت إلى نص =====
 async function transcribeAudio(msg) {
     let audioPath = null;
     try {
@@ -71,11 +69,10 @@ async function transcribeAudio(msg) {
         });
         const result = await response.json();
         return result.text || null;
-    } catch (err) { console.log('⚠️ STT:', err.message); return null; }
+    } catch (err) { console.log('STT:', err.message); return null; }
     finally { if (audioPath && fs.existsSync(audioPath)) { try { fs.unlinkSync(audioPath); } catch (e) {} } }
 }
 
-// ===== السؤال للذكاء الاصطناعي =====
 async function askAI(userText) {
     try {
         const completion = await groq.chat.completions.create({
@@ -88,7 +85,7 @@ async function askAI(userText) {
             max_tokens: 2048
         });
         return completion.choices?.[0]?.message?.content || null;
-    } catch (err) { console.log('⚠️ AI:', err.message); return null; }
+    } catch (err) { console.log('AI:', err.message); return null; }
 }
 
 // ===== سيرفر الويب =====
@@ -96,9 +93,9 @@ http.createServer(async (req, res) => {
     try {
         const url = req.url.split('?')[0];
 
-        // صفحة رئيسية
         if (url === '/') {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            const qrImg = currentQR ? await qrcode.toDataURL(currentQR, {margin:2, scale:6}) : '';
             res.end(`
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -108,121 +105,73 @@ http.createServer(async (req, res) => {
 <title>Zain Cyber Bot</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body {
-    font-family: 'Segoe UI', Tahoma, sans-serif;
-    background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-    color: #fff; min-height: 100vh; padding: 20px;
-    display: flex; flex-direction: column; align-items: center;
-  }
+  body { font-family:'Segoe UI',sans-serif; background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%); color:#fff; min-height:100vh; padding:20px; display:flex; flex-direction:column; align-items:center; }
   .header { text-align:center; margin-bottom:30px; }
   .header h1 { font-size:28px; margin-bottom:10px; }
-  .status-badge {
-    display:inline-block; padding:8px 20px; border-radius:20px;
-    font-size:14px; font-weight:bold;
-  }
-  .status-online { background:#10b981; color:#fff; }
-  .status-offline { background:#ef4444; color:#fff; }
-  .card {
-    background:rgba(255,255,255,0.05);
-    border:1px solid rgba(255,255,255,0.1);
-    border-radius:16px; padding:25px; margin:15px 0; width:100%; max-width:500px;
-    backdrop-filter: blur(10px);
-  }
+  .badge { display:inline-block; padding:8px 20px; border-radius:20px; font-weight:bold; font-size:14px; }
+  .online { background:#10b981; }
+  .offline { background:#ef4444; }
+  .card { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:16px; padding:25px; margin:15px 0; width:100%; max-width:500px; }
   .card h2 { font-size:20px; margin-bottom:15px; color:#a78bfa; }
-  .pair-code {
-    background:#000; color:#10b981; padding:20px;
-    border-radius:10px; font-size:32px; font-weight:bold;
-    text-align:center; letter-spacing:8px;
-    font-family: 'Courier New', monospace;
-    margin:10px 0; user-select:all;
-  }
-  .hint { font-size:13px; color:#9ca3af; margin-top:10px; line-height:1.6; }
-  .btn {
-    display:inline-block; background:#7c3aed; color:#fff;
-    padding:12px 24px; border-radius:10px; text-decoration:none;
-    font-weight:bold; margin:8px 5px; border:none; cursor:pointer; font-size:15px;
-  }
-  .btn:hover { background:#6d28d9; }
+  .code { background:#000; color:#10b981; padding:20px; border-radius:10px; font-size:32px; font-weight:bold; text-align:center; letter-spacing:8px; font-family:monospace; margin:10px 0; user-select:all; }
+  .hint { font-size:13px; color:#9ca3af; margin-top:10px; line-height:1.8; }
+  .btn { display:inline-block; background:#7c3aed; color:#fff; padding:12px 24px; border-radius:10px; text-decoration:none; font-weight:bold; margin:8px 5px; border:none; cursor:pointer; font-size:15px; }
   .btn-green { background:#10b981; }
-  .btn-green:hover { background:#059669; }
   img.qr { background:#fff; padding:15px; border-radius:12px; display:block; margin:10px auto; max-width:100%; }
-  ol { padding-right:20px; line-height:2; }
-  li { margin-bottom:5px; }
   .error { background:#7f1d1d; padding:12px; border-radius:8px; font-size:14px; margin-top:10px; }
-  .footer { margin-top:40px; text-align:center; font-size:12px; color:#6b7280; }
 </style>
 </head>
 <body>
   <div class="header">
-    <h1>🛡️ Zain Cyber Bot v3.0</h1>
-    <span class="status-badge ${isConnected ? 'status-online' : 'status-offline'}">
-      ${isConnected ? '✅ متصل' : '⏳ غير متصل'}
-    </span>
+    <h1>🛡️ Zain Cyber Bot v3.1</h1>
+    <span class="badge ${isConnected?'online':'offline'}">${isConnected?'✅ متصل':'⏳ غير متصل'}</span>
   </div>
 
   ${currentPairCode ? `
   <div class="card">
-    <h2>🔑 رمز الربط (Pairing Code)</h2>
-    <div class="pair-code" id="code">${currentPairCode}</div>
-    <button class="btn btn-green" onclick="copyCode()">📋 نسخ الرمز</button>
+    <h2>🔑 رمز الربط</h2>
+    <div class="code" id="code">${currentPairCode}</div>
+    <button class="btn btn-green" onclick="navigator.clipboard.writeText('${currentPairCode}');alert('تم النسخ!')">📋 نسخ</button>
     <div class="hint">
-      <b>⚠️ الرمز صالح لمدة 60 ثانية فقط</b><br>
-      1. افتح واتساب<br>
-      2. الإعدادات → الأجهزة المرتبطة → ربط جهاز<br>
+      ⚠️ الرمز صالح 60 ثانية فقط!<br>
+      1. واتساب → الإعدادات<br>
+      2. الأجهزة المرتبطة → ربط جهاز<br>
       3. اختر "الربط برقم الهاتف"<br>
-      4. أدخل الرمز أعلاه
+      4. أدخل الرمز
     </div>
-  </div>
-  ` : ''}
+  </div>` : ''}
 
-  ${currentQR ? `
+  ${qrImg ? `
   <div class="card">
-    <h2>📱 رمز QR</h2>
-    <img class="qr" src="${await qrcode.toDataURL(currentQR, {margin:2, scale:6})}" alt="QR Code">
-    <div class="hint">
-      افتح واتساب → الأجهزة المرتبطة → ربط جهاز → امسح الرمز
-    </div>
-  </div>
-  ` : ''}
+    <h2>📱 QR Code</h2>
+    <img class="qr" src="${qrImg}">
+    <div class="hint">امسح من واتساب → الأجهزة المرتبطة</div>
+  </div>` : ''}
 
   ${!currentQR && !currentPairCode ? `
   <div class="card">
-    <h2>⏳ في انتظار الرمز...</h2>
-    <p class="hint">قد يستغرق 10-30 ثانية. حدّث الصفحة بعد قليل.</p>
+    <h2>⏳ جاري التحميل...</h2>
+    <p class="hint">انتظر 15-30 ثانية ثم حدّث الصفحة</p>
     <button class="btn" onclick="location.reload()">🔄 تحديث</button>
-  </div>
-  ` : ''}
+  </div>` : ''}
 
   ${lastError ? `<div class="error">⚠️ ${lastError}</div>` : ''}
 
   <div class="card">
-    <h2>🎯 معلومات الاتصال</h2>
+    <h2>ℹ️ معلومات</h2>
     <p class="hint">
-      <b>رقم الهاتف:</b> ${PHONE_NUMBER || '<span style="color:#ef4444">غير محدد في Environment!</span>'}<br>
-      <b>الحالة:</b> ${isConnected ? 'متصل بواتساب ✅' : 'غير متصل'}<br>
-      <b>Uptime:</b> ${Math.floor(process.uptime())} ثانية
+      <b>الرقم:</b> ${PHONE_NUMBER || '❌ غير محدد'}<br>
+      <b>الحالة:</b> ${isConnected?'متصل':'غير متصل'}<br>
+      <b>Uptime:</b> ${Math.floor(process.uptime())}s
     </p>
   </div>
 
-  <div class="footer">
-    Zain Cyber Bot v3.0 - Powered by Groq AI
-  </div>
-
   <script>
-    function copyCode() {
-      const code = document.getElementById('code').innerText;
-      navigator.clipboard.writeText(code).then(() => {
-        alert('✅ تم نسخ الرمز: ' + code);
-      });
-    }
-    // تحديث تلقائي كل 20 ثانية إذا لم يوجد رمز
-    ${!currentQR && !currentPairCode ? 'setTimeout(() => location.reload(), 20000);' : ''}
+    ${!currentQR && !currentPairCode ? 'setTimeout(()=>location.reload(),15000);' : ''}
   </script>
 </body>
-</html>
-            `);
+</html>`);
         }
-        // API JSON
         else if (url === '/api/status') {
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
             res.end(JSON.stringify({
@@ -235,23 +184,12 @@ http.createServer(async (req, res) => {
                 error: lastError
             }));
         }
-        else if (url === '/health') {
-            res.writeHead(200); res.end('OK');
-        }
-        else {
-            res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end('<h1>404 - Not Found</h1><a href="/">الرئيسية</a>');
-        }
-    } catch (e) {
-        console.log('Web error:', e.message);
-        res.writeHead(500); res.end('Error');
-    }
-}).listen(PORT, () => console.log(`🌐 Dashboard: http://localhost:${PORT}`));
+        else if (url === '/health') { res.writeHead(200); res.end('OK'); }
+        else { res.writeHead(404); res.end('Not Found'); }
+    } catch (e) { res.writeHead(500); res.end('Error'); }
+}).listen(PORT, () => console.log('Dashboard on port ' + PORT));
 
-// ===== Keep-Alive =====
-setInterval(() => {
-    http.get(`http://localhost:${PORT}/health`, () => {}).on('error', () => {});
-}, 4 * 60 * 1000);
+setInterval(() => { http.get(`http://localhost:${PORT}/health`, () => {}).on('error', () => {}); }, 240000);
 
 // ===== تشغيل البوت =====
 async function startBot() {
@@ -268,50 +206,48 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // طلب رمز الربط عند البدء
-        if (!state.creds.registered && PHONE_NUMBER) {
-            console.log('📱 طلب رمز الربط للرقم:', PHONE_NUMBER);
-            setTimeout(async () => {
-                try {
-                    const code = await sock.requestPairingCode(PHONE_NUMBER);
-                    currentPairCode = code;
-                    console.log('\n╔════════════════════════════════════════╗');
-                    console.log('║  🔑 رمز الربط: ' + code);
-                    console.log('║  🌐 الرابط: https://cyber-bot-urcz.onrender.com/');
-                    console.log('╚════════════════════════════════════════╝\n');
-                } catch (err) {
-                    lastError = 'فشل طلب رمز الربط: ' + err.message;
-                    console.log('❌', lastError);
-                }
-            }, 6000);
-        }
-
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
 
+            // ✅ الطريقة الصحيحة: ننتظر إشارة QR ثم نطلب الرمز
             if (qr) {
                 currentQR = qr;
-                console.log('📱 تم توليد QR جديد');
+                console.log('📱 QR جديد');
+
+                if (!state.creds.registered && PHONE_NUMBER && !pairingRequested) {
+                    pairingRequested = true;
+                    setTimeout(async () => {
+                        try {
+                            console.log('📱 طلب رمز الربط للرقم:', PHONE_NUMBER);
+                            const code = await sock.requestPairingCode(PHONE_NUMBER);
+                            currentPairCode = code;
+                            lastError = '';
+                            console.log('\n🔑 PAIRING CODE: ' + code + '\n');
+                        } catch (err) {
+                            lastError = 'فشل الرمز: ' + err.message;
+                            pairingRequested = false;
+                            console.log('❌', lastError);
+                        }
+                    }, 2000);
+                }
             }
 
             if (connection === 'close') {
                 currentQR = null;
+                currentPairCode = null;
                 isConnected = false;
+                pairingRequested = false;
                 const code = lastDisconnect?.error?.output?.statusCode;
-                console.log('❌ انقطع الاتصال، الكود:', code);
+                console.log('❌ انقطع، كود:', code);
                 if (code !== DisconnectReason.loggedOut) {
                     setTimeout(startBot, 5000);
-                } else {
-                    lastError = 'تم تسجيل الخروج - احذف مجلد session';
                 }
             } else if (connection === 'open') {
                 currentQR = null;
                 currentPairCode = null;
                 isConnected = true;
                 lastError = '';
-                console.log('\n╔════════════════════════════════════════╗');
-                console.log('║  ✅ البوت متصل بنجاح!                  ║');
-                console.log('╚════════════════════════════════════════╝\n');
+                console.log('✅ البوت متصل!');
             }
         });
 
@@ -326,14 +262,14 @@ async function startBot() {
                 let text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
                 if (msg.message.audioMessage) {
-                    await sock.sendMessage(from, { text: '🎧 جاري تحليل الصوت...' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '🎧 جاري التحليل...' }, { quoted: msg });
                     const t = await transcribeAudio(msg);
                     if (t) text = t;
                     else { await sock.sendMessage(from, { text: '❌ لم أفهم الصوت' }, { quoted: msg }); return; }
                 }
 
                 if (!text || !text.trim()) return;
-                console.log('📨', from, ':', text.substring(0, 50));
+                console.log('📨', text.substring(0, 50));
 
                 await sock.sendPresenceUpdate('composing', from);
                 const reply = await askAI(text);
@@ -341,15 +277,15 @@ async function startBot() {
                     await sock.sendMessage(from, { text: reply }, { quoted: msg });
                     await sendVoiceReply(reply, from, msg);
                 }
-            } catch (err) { console.log('⚠️ Message:', err.message); }
+            } catch (err) { console.log('Msg:', err.message); }
         });
 
     } catch (err) {
-        lastError = 'Boot error: ' + err.message;
+        lastError = 'Boot: ' + err.message;
         console.error('❌', err.message);
         setTimeout(startBot, 10000);
     }
 }
 
-console.log('🚀 Zain Cyber Bot v3.0 starting...');
+console.log('🚀 Zain Cyber Bot v3.1');
 startBot();
